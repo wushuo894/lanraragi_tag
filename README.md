@@ -6,11 +6,13 @@
 
 `-h --host 服务地址 默认 http://127.0.0.1:3000`
 
-`-p --password 管理员密码 必填`
+`-k --key Api Key 必填`
+
+`-t 线程数量 默认为 2`
 
 命令示例
 
-`java -jar .\lanraragi_tag-jar-with-dependencies.jar -p 123456 -h http://127.0.0.1:3000`
+`java -jar .\lanraragi_tag-jar-with-dependencies.jar -k 123456 -h http://127.0.0.1:3000`
 
 ### 原理
 

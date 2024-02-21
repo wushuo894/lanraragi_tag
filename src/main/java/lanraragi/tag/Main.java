@@ -3,8 +3,9 @@ package lanraragi.tag;
 import cn.hutool.core.codec.Base64;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Assert;
+import cn.hutool.core.thread.ExecutorBuilder;
+import cn.hutool.core.thread.ThreadUtil;
 import cn.hutool.core.util.ArrayUtil;
-import cn.hutool.core.util.PageUtil;
 import cn.hutool.core.util.ReUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.Header;
@@ -16,40 +17,91 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 public class Main {
     public static final Gson gson = new Gson();
     public static String AUTHORIZATION = "";
-    public static String host = "http://127.0.0.1:3000";
-    public static String password = "";
+    public static String HOST = "http://127.0.0.1:3000";
+    public static String KEY = "";
+
+    public static ExecutorService EXECUTOR;
 
     public static void main(String[] args) {
         if (ArrayUtil.isEmpty(args)) {
             return;
         }
 
+        int threadNum = 2;
+
         for (List<String> strings : CollUtil.split(List.of(args), 2)) {
             String k = strings.get(0);
             String v = strings.get(1);
-            if (List.of("-p", "--password").contains(k)) {
-                password = v;
+            if (List.of("-k", "--key").contains(k)) {
+                KEY = v;
             }
             if (List.of("-h", "--host").contains(k)) {
-                host = v;
+                HOST = v;
+            }
+            if (List.of("-t").contains(k)) {
+                threadNum = Integer.parseInt(v);
             }
         }
 
-        if (StrUtil.isBlank(password)) {
-            Assert.notBlank(password, "password no can`t blank");
+        EXECUTOR = ExecutorBuilder.create()
+                .setCorePoolSize(threadNum)
+                .setMaxPoolSize(threadNum)
+                .setWorkQueue(new LinkedBlockingQueue<>(100))
+                .build();
+
+        if (StrUtil.isBlank(KEY)) {
+            Assert.notBlank(KEY, "password no can`t blank");
         }
-        AUTHORIZATION = "Bearer " + Base64.encode(password);
+        AUTHORIZATION = "Bearer " + Base64.encode(KEY);
 
 
-        int length = 100;
+        AtomicLong recordsFiltered = new AtomicLong(100L);
 
-        while (true) {
-            HttpResponse execute = HttpRequest.get(host + "/search")
+        int length = 10;
+
+        AtomicLong index = new AtomicLong(0);
+
+        AtomicBoolean loop = new AtomicBoolean(true);
+
+        ThreadUtil.execute(() -> {
+            do {
+                long index_ = index.get();
+                long recordsFiltered_ = recordsFiltered.get();
+
+                loop.set(index_ < recordsFiltered_);
+
+                int progress = Double.valueOf((index_ * 1.0 / (recordsFiltered_ * 1.0)) * 100).intValue();
+
+                System.out.print("\r");
+                System.out.print("[");
+                for (int i = 0; i < progress; i++) {
+                    System.out.print("=");
+                }
+                for (int i = progress; i < 100; i++) {
+                    System.out.print(" ");
+                }
+                System.out.print("]");
+                System.out.print(" " + progress + "%");
+                ThreadUtil.sleep(10);
+            } while (loop.get());
+
+            System.out.println();
+            System.out.println("end");
+            System.exit(0);
+        });
+
+        while (loop.get()) {
+            HttpResponse execute = HttpRequest.get(HOST + "/search")
                     .form("length", length)
                     .form("start", 0)
                     .form("search[value]", "date_added")
@@ -58,46 +110,49 @@ public class Main {
             String body = execute.body();
             JsonObject asJsonObject = gson.fromJson(body, JsonObject.class);
             JsonArray asJsonArray = asJsonObject.getAsJsonArray("data");
-            long recordsFiltered = asJsonObject.get("recordsFiltered").getAsLong();
+            synchronized (recordsFiltered) {
+                recordsFiltered.set(asJsonObject.get("recordsFiltered").getAsLong());
+            }
             List<JsonElement> jsonElements = asJsonArray.asList();
             int size = jsonElements.size();
-            int index = 0;
 
             if (size < 1) {
-                System.out.println("end");
-                break;
+                continue;
             }
+
+            CountDownLatch countDownLatch = new CountDownLatch(size);
 
             for (JsonElement element : jsonElements) {
-                index++;
+                EXECUTOR.submit(() -> {
+                    Info info = gson.fromJson(element, Info.class);
 
-                System.out.println("page=" + PageUtil.totalPage(recordsFiltered, length) + "\t" + index + "/" + size);
+                    String title = info.getTitle();
 
-                Info info = gson.fromJson(element, Info.class);
-                System.out.println(info);
+                    List<String> tags = ReUtil.findAll("[\\(\\[]([^()\\[\\]]+)[\\)\\]]", title, 1)
+                            .stream()
+                            .map(String::trim)
+                            .filter(StrUtil::isNotBlank)
+                            .collect(Collectors.toList());
 
-                String title = info.getTitle();
-
-                List<String> tags = ReUtil.findAll("[\\(\\[]([^()\\[\\]]+)[\\)\\]]", title, 1)
-                        .stream()
-                        .map(String::trim)
-                        .filter(StrUtil::isNotBlank)
-                        .collect(Collectors.toList());
-
-                System.out.println("title = " + title);
-                System.out.println(CollUtil.join(tags, ","));
-
-                HttpResponse metadata = HttpRequest.put(host + "/api/archives/" + info.getArcid() + "/metadata")
-                        .form("tags", CollUtil.join(tags, ","))
-                        .form("title", title)
-                        .header(Header.AUTHORIZATION, AUTHORIZATION)
-                        .execute();
-                System.out.println(metadata.body());
+                    HttpRequest.put(HOST + "/api/archives/" + info.getArcid() + "/metadata")
+                            .form("tags", CollUtil.join(tags, ","))
+                            .form("title", title)
+                            .header(Header.AUTHORIZATION, AUTHORIZATION)
+                            .execute();
+                    synchronized (Main.class) {
+                        // 进度累加
+                        index.incrementAndGet();
+                        countDownLatch.countDown();
+                    }
+                });
             }
-            for (int i = 0; i < 100; i++) {
-                System.out.print("=");
+
+            // 等待当前页完成
+            try {
+                countDownLatch.await();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
             }
-            System.out.println("");
         }
     }
 }
