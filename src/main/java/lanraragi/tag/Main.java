@@ -65,7 +65,7 @@ public class Main {
         AUTHORIZATION = "Bearer " + Base64.encode(KEY);
 
 
-        AtomicLong recordsFiltered = new AtomicLong(100L);
+        AtomicLong recordsFiltered = new AtomicLong(-1L);
 
         int length = 10;
 
@@ -77,6 +77,10 @@ public class Main {
             do {
                 long index_ = index.get();
                 long recordsFiltered_ = recordsFiltered.get();
+
+                if (recordsFiltered_ < 0) {
+                    continue;
+                }
 
                 loop.set(index_ < recordsFiltered_);
 
@@ -110,7 +114,7 @@ public class Main {
             String body = execute.body();
             JsonObject asJsonObject = gson.fromJson(body, JsonObject.class);
             JsonArray asJsonArray = asJsonObject.getAsJsonArray("data");
-            synchronized (recordsFiltered) {
+            if (recordsFiltered.get() < 0) {
                 recordsFiltered.set(asJsonObject.get("recordsFiltered").getAsLong());
             }
             List<JsonElement> jsonElements = asJsonArray.asList();
