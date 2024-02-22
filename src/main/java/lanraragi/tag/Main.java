@@ -22,6 +22,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 public class Main {
@@ -73,6 +74,8 @@ public class Main {
 
         AtomicBoolean loop = new AtomicBoolean(true);
 
+        ReentrantLock lock = new ReentrantLock();
+
         ThreadUtil.execute(() -> {
             do {
                 long index_ = index.get();
@@ -81,6 +84,9 @@ public class Main {
                 if (recordsFiltered_ < 0) {
                     continue;
                 }
+
+
+                lock.lock();
 
                 loop.set(index_ < recordsFiltered_);
 
@@ -96,6 +102,7 @@ public class Main {
                 }
                 System.out.print("]");
                 System.out.print(" " + progress + "%");
+                lock.unlock();
                 ThreadUtil.sleep(10);
             } while (loop.get());
 
@@ -108,7 +115,7 @@ public class Main {
             HttpResponse execute = HttpRequest.get(HOST + "/search")
                     .form("length", length)
                     .form("start", 0)
-                    .form("search[value]", "date_added")
+//                    .form("search[value]", "date_added")
                     .header(Header.AUTHORIZATION, AUTHORIZATION)
                     .execute();
             String body = execute.body();
@@ -138,11 +145,19 @@ public class Main {
                             .filter(StrUtil::isNotBlank)
                             .collect(Collectors.toList());
 
-                    HttpRequest.put(HOST + "/api/archives/" + info.getArcid() + "/metadata")
+                    HttpResponse response = HttpRequest.put(HOST + "/api/archives/" + info.getArcid() + "/metadata")
                             .form("tags", CollUtil.join(tags, ","))
                             .form("title", title)
                             .header(Header.AUTHORIZATION, AUTHORIZATION)
                             .execute();
+                    String error = gson.fromJson(response.body(), JsonObject.class).get("error").getAsString();
+                    if (StrUtil.isNotBlank(error)) {
+                        lock.lock();
+                        System.out.print("\r\n");
+                        System.err.print(error);
+                        System.exit(1);
+                        lock.unlock();
+                    }
                     synchronized (Main.class) {
                         // 进度累加
                         index.incrementAndGet();
