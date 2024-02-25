@@ -1,9 +1,13 @@
-package lanraragi.tag;
+package lanraragi.tag.entity;
 
 import lombok.Data;
+import lombok.experimental.Accessors;
+
+import java.io.Serializable;
 
 @Data
-public class Info {
+@Accessors(chain = true)
+public class Info implements Serializable {
     private String arcid;
     private String extension;
     private String isnew;

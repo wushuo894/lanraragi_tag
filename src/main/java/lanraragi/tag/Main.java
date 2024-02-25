@@ -6,7 +6,6 @@ import cn.hutool.core.lang.Assert;
 import cn.hutool.core.thread.ExecutorBuilder;
 import cn.hutool.core.thread.ThreadUtil;
 import cn.hutool.core.util.ArrayUtil;
-import cn.hutool.core.util.ReUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.Header;
 import cn.hutool.http.HttpRequest;
@@ -15,6 +14,8 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import lanraragi.tag.entity.Info;
+import lanraragi.tag.util.InfoUtil;
 
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -23,7 +24,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.stream.Collectors;
 
 public class Main {
     public static final Gson gson = new Gson();
@@ -137,13 +137,15 @@ public class Main {
                 EXECUTOR.submit(() -> {
                     Info info = gson.fromJson(element, Info.class);
 
-                    String title = info.getTitle();
+                    String title = InfoUtil.getTitle(info);
+                    List<String> tags = InfoUtil.getTags(info);
 
-                    List<String> tags = ReUtil.findAll("[\\(\\[]([^()\\[\\]]+)[\\)\\]]", title, 1)
-                            .stream()
-                            .map(String::trim)
-                            .filter(StrUtil::isNotBlank)
-                            .collect(Collectors.toList());
+                    if (tags.isEmpty()) {
+                        // 进度累加
+                        index.incrementAndGet();
+                        countDownLatch.countDown();
+                        return;
+                    }
 
                     HttpResponse response = HttpRequest.put(HOST + "/api/archives/" + info.getArcid() + "/metadata")
                             .form("tags", CollUtil.join(tags, ","))
@@ -158,11 +160,9 @@ public class Main {
                         System.exit(1);
                         lock.unlock();
                     }
-                    synchronized (Main.class) {
-                        // 进度累加
-                        index.incrementAndGet();
-                        countDownLatch.countDown();
-                    }
+                    // 进度累加
+                    index.incrementAndGet();
+                    countDownLatch.countDown();
                 });
             }
 
