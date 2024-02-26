@@ -140,13 +140,6 @@ public class Main {
                     String title = InfoUtil.getTitle(info);
                     List<String> tags = InfoUtil.getTags(info);
 
-                    if (tags.isEmpty()) {
-                        // 进度累加
-                        index.incrementAndGet();
-                        countDownLatch.countDown();
-                        return;
-                    }
-
                     HttpResponse response = HttpRequest.put(HOST + "/api/archives/" + info.getArcid() + "/metadata")
                             .form("tags", CollUtil.join(tags, ","))
                             .form("title", title)
