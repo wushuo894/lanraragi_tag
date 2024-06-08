@@ -33,7 +33,7 @@ wushuo894/lanraragi_tag`
 | HOST       | lanraragi 地址 | http://127.0.0.1:3000 |
 | KEY        | API Key      | 空                     |
 | THREAD_NUM | 线程数量         | 2                     |
-| RUN        | 启动时运行        | FALSE                 |
+| RUN        | 启动时运行        | TRUE                  |
 | CRON       | 计划任务         | 0 1 * * *             |
 | TZ         | 时区           | Asia/Shanghai         |
 
