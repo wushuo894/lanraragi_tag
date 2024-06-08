@@ -7,9 +7,11 @@ import cn.hutool.core.thread.ExecutorBuilder;
 import cn.hutool.core.thread.ThreadUtil;
 import cn.hutool.core.util.ArrayUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.cron.CronUtil;
 import cn.hutool.http.Header;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
+import cn.hutool.log.Log;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -17,40 +19,60 @@ import com.google.gson.JsonObject;
 import lanraragi.tag.entity.Info;
 import lanraragi.tag.util.InfoUtil;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
-public class Main {
+public class Main implements Runnable {
     public static final Gson gson = new Gson();
     public static String AUTHORIZATION = "";
     public static String HOST = "http://127.0.0.1:3000";
     public static String KEY = "";
+    public static Log log = Log.get(Main.class);
 
     public static ExecutorService EXECUTOR;
 
     public static void main(String[] args) {
-        if (ArrayUtil.isEmpty(args)) {
-            return;
-        }
+        HashMap<String, String> map = new HashMap<>();
+
+        Map<String, String> envMap = System.getenv();
+        Map<String, String> argsMap = CollUtil.split(List.of(args), 2)
+                .stream()
+                .collect(Collectors.toMap(it -> it.get(0), it -> it.get(1)));
+
+        map.putAll(argsMap);
+        map.putAll(envMap);
 
         int threadNum = 2;
 
-        for (List<String> strings : CollUtil.split(List.of(args), 2)) {
-            String k = strings.get(0);
-            String v = strings.get(1);
-            if (List.of("-k", "--key").contains(k)) {
+        boolean run = Boolean.TRUE;
+
+        String cron = "";
+
+        for (Map.Entry<String, String> stringStringEntry : map.entrySet()) {
+            String k = stringStringEntry.getKey();
+            String v = stringStringEntry.getValue();
+            if (List.of("-k", "--key", "KEY").contains(k)) {
                 KEY = v;
             }
-            if (List.of("-h", "--host").contains(k)) {
+            if (List.of("-h", "--host", "HOST").contains(k)) {
                 HOST = v;
             }
-            if (List.of("-t").contains(k)) {
+            if (List.of("-c", "--cron", "CRON").contains(k)) {
+                cron = v;
+            }
+            if (List.of("-t", "THREAD_NUM").contains(k)) {
                 threadNum = Integer.parseInt(v);
+            }
+            if (List.of("-r", "--run", "RUN").contains(k)) {
+                run = Boolean.parseBoolean(v);
             }
         }
 
@@ -61,11 +83,27 @@ public class Main {
                 .build();
 
         if (StrUtil.isBlank(KEY)) {
-            Assert.notBlank(KEY, "password no can`t blank");
+            Assert.notBlank(KEY, "KEY no can`t blank");
         }
         AUTHORIZATION = "Bearer " + Base64.encode(KEY);
 
+        Main main = new Main();
+        try {
+            if (run) {
+                ThreadUtil.execute(main);
+            }
+        } catch (Exception e) {
+            log.error(e);
+        }
 
+        if (StrUtil.isNotBlank(cron)) {
+            CronUtil.schedule(cron, main);
+            CronUtil.start();
+        }
+    }
+
+    @Override
+    public synchronized void run() {
         AtomicLong recordsFiltered = new AtomicLong(-1L);
 
         int length = 10;
@@ -107,24 +145,21 @@ public class Main {
             } while (loop.get());
 
             System.out.println();
-            System.out.println("end");
-            System.exit(0);
+            log.info("end");
         });
 
         while (loop.get()) {
-            HttpResponse execute = HttpRequest.get(HOST + "/search")
+            JsonObject jsonObject = HttpRequest.get(HOST + "/search")
                     .form("length", length)
                     .form("start", 0)
                     .form("search[value]", "date_added")
                     .header(Header.AUTHORIZATION, AUTHORIZATION)
-                    .execute();
-            String body = execute.body();
-            JsonObject asJsonObject = gson.fromJson(body, JsonObject.class);
-            JsonArray asJsonArray = asJsonObject.getAsJsonArray("data");
+                    .thenFunction(res -> gson.fromJson(res.body(), JsonObject.class));
+            JsonArray data = jsonObject.getAsJsonArray("data");
             if (recordsFiltered.get() < 0) {
-                recordsFiltered.set(asJsonObject.get("recordsFiltered").getAsLong());
+                recordsFiltered.set(jsonObject.get("recordsFiltered").getAsLong());
             }
-            List<JsonElement> jsonElements = asJsonArray.asList();
+            List<JsonElement> jsonElements = data.asList();
             int size = jsonElements.size();
 
             if (size < 1) {
@@ -135,23 +170,25 @@ public class Main {
 
             for (JsonElement element : jsonElements) {
                 EXECUTOR.submit(() -> {
-                    Info info = gson.fromJson(element, Info.class);
+                    try {
+                        Info info = gson.fromJson(element, Info.class);
 
-                    String title = InfoUtil.getTitle(info);
-                    List<String> tags = InfoUtil.getTags(info);
+                        String title = InfoUtil.getTitle(info);
+                        List<String> tags = InfoUtil.getTags(info);
 
-                    HttpResponse response = HttpRequest.put(HOST + "/api/archives/" + info.getArcid() + "/metadata")
-                            .form("tags", CollUtil.join(tags, ","))
-                            .form("title", title)
-                            .header(Header.AUTHORIZATION, AUTHORIZATION)
-                            .execute();
-                    String error = gson.fromJson(response.body(), JsonObject.class).get("error").getAsString();
-                    if (StrUtil.isNotBlank(error)) {
-                        lock.lock();
-                        System.out.print("\r\n");
-                        System.err.print(error);
-                        System.exit(1);
-                        lock.unlock();
+                        String error = HttpRequest.put(HOST + "/api/archives/" + info.getArcid() + "/metadata")
+                                .form("tags", CollUtil.join(tags, ","))
+                                .form("title", title)
+                                .header(Header.AUTHORIZATION, AUTHORIZATION)
+                                .thenFunction(res -> gson.fromJson(res.body(), JsonObject.class).get("error").getAsString());
+                        if (StrUtil.isNotBlank(error)) {
+                            lock.lock();
+                            System.out.print("\r\n");
+                            System.err.print(error);
+                            lock.unlock();
+                        }
+                    } catch (Exception e) {
+                        log.error(e);
                     }
                     // 进度累加
                     index.incrementAndGet();
@@ -163,7 +200,7 @@ public class Main {
             try {
                 countDownLatch.await();
             } catch (InterruptedException e) {
-                e.printStackTrace();
+                log.error(e);
             }
         }
     }
