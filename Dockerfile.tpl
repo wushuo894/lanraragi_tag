@@ -1,5 +1,5 @@
 FROM openjdk:17-jdk
-COPY target/lanraragi_tag-with-dependencies.jar /usr/app/lanraragi_tag-jar-with-dependencies.jar
+COPY target/lanraragi_tag-jar-with-dependencies.jar /usr/app/lanraragi_tag-jar-with-dependencies.jar
 WORKDIR /usr/app
 ENV HOST="http://192.168.5.4:7788"
 ENV KEY=""
