@@ -22,6 +22,7 @@ import lanraragi.tag.util.InfoUtil;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -73,6 +74,9 @@ public class Main implements Runnable {
             }
             if (List.of("-r", "--run", "RUN").contains(k)) {
                 run = Boolean.parseBoolean(v);
+            }
+            if (List.of("--tz", "TZ").contains(k)) {
+                TimeZone.setDefault(TimeZone.getTimeZone(v));
             }
         }
 
