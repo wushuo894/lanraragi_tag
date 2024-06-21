@@ -18,7 +18,6 @@
 
 `docker run -d \
 --name lanraragi_tag \
--v ./video:/video \
 -e HOST="http://127.0.0.1:3000" \
 -e KEY="" \
 -e THREAD_NUM="2" \
