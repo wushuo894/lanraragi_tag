@@ -12,20 +12,11 @@
 
 ### 命令示例
 
-`java -jar .\lanraragi_tag-jar-with-dependencies.jar -k 123456 -h http://127.0.0.1:3000`
+    java -jar .\lanraragi_tag-jar-with-dependencies.jar -k 123456 -h http://127.0.0.1:3000
 
 ### Docker部署
 
-`docker run -d \
---name lanraragi_tag \
--e HOST="http://127.0.0.1:3000" \
--e KEY="" \
--e THREAD_NUM="2" \
--e RUN="TRUE" \
--e CRON="0 1 * * *" \
--e TZ=Asia/Shanghai \
---restart always \
-wushuo894/lanraragi_tag`
+    docker run -d --name lanraragi_tag -e HOST="http://127.0.0.1:3000" -e KEY="" -e THREAD_NUM="2" -e RUN="TRUE" -e CRON="0 1 * * *" -e TZ=Asia/Shanghai --restart always wushuo894/lanraragi_tag
 
 | 参数         | 作用           | 默认值                   |
 |------------|--------------|-----------------------|
